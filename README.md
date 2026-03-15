@@ -1,4 +1,5 @@
 # omarchy-exegol-vm
+![Architecture](docs/architecture.svg)
 
 Provides a secure, encrypted Exegol offensive-security VM for [Omarchy](https://github.com/basecamp/omarchy) using a dockerized QEMU environment. Ships with triple-layer encryption (host LUKS + ephemeral tmpfs + dedicated workspace LUKS), cloud-init automated setup, and full Hyprland/Walker integration.
 

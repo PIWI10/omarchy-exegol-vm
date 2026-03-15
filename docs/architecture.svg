@@ -1,0 +1,142 @@
+<svg width="100%" viewBox="0 0 680 720" xmlns="http://www.w3.org/2000/svg">
+<style>
+  text { font-family: sans-serif; }
+  .th { font-size: 14px; font-weight: 500; }
+  .ts { font-size: 12px; font-weight: 400; }
+  .title { font-size: 16px; font-weight: 500; }
+
+  /* Light mode defaults */
+  .layer-host rect { fill: #F1EFE8; stroke: #5F5E5A; }
+  .layer-host .th { fill: #2C2C2A; } .layer-host .ts { fill: #5F5E5A; }
+  .layer-vm rect { fill: #EEEDFE; stroke: #534AB7; }
+  .layer-vm .th { fill: #26215C; } .layer-vm .ts { fill: #534AB7; }
+  .ephemeral rect { fill: #FAECE7; stroke: #993C1D; }
+  .ephemeral .th { fill: #4A1B0C; } .ephemeral .ts { fill: #993C1D; }
+  .docker rect { fill: #E1F5EE; stroke: #0F6E56; }
+  .docker .th { fill: #04342C; } .docker .ts { fill: #0F6E56; }
+  .workspace rect { fill: #FAEEDA; stroke: #854F0B; }
+  .workspace .th { fill: #412402; } .workspace .ts { fill: #854F0B; }
+  .flow-blue rect { fill: #E6F1FB; stroke: #185FA5; }
+  .flow-blue .th { fill: #042C53; }
+  .flow-teal rect { fill: #E1F5EE; stroke: #0F6E56; }
+  .flow-teal .th { fill: #04342C; }
+  .flow-amber rect { fill: #FAEEDA; stroke: #854F0B; }
+  .flow-amber .th { fill: #412402; }
+  .pass rect { fill: #F1EFE8; stroke: #5F5E5A; }
+  .pass .th { fill: #2C2C2A; } .pass .ts { fill: #5F5E5A; }
+  .arr { stroke: #888780; stroke-width: 1.5; }
+  .title-text { fill: #2C2C2A; }
+  .separator { fill: #88878080; }
+
+  @media (prefers-color-scheme: dark) {
+    .layer-host rect { fill: #2C2C2A; stroke: #B4B2A9; }
+    .layer-host .th { fill: #F1EFE8; } .layer-host .ts { fill: #B4B2A9; }
+    .layer-vm rect { fill: #26215C; stroke: #AFA9EC; }
+    .layer-vm .th { fill: #EEEDFE; } .layer-vm .ts { fill: #AFA9EC; }
+    .ephemeral rect { fill: #4A1B0C; stroke: #F0997B; }
+    .ephemeral .th { fill: #FAECE7; } .ephemeral .ts { fill: #F0997B; }
+    .docker rect { fill: #04342C; stroke: #5DCAA5; }
+    .docker .th { fill: #E1F5EE; } .docker .ts { fill: #5DCAA5; }
+    .workspace rect { fill: #412402; stroke: #FAC775; }
+    .workspace .th { fill: #FAEEDA; } .workspace .ts { fill: #FAC775; }
+    .flow-blue rect { fill: #042C53; stroke: #85B7EB; }
+    .flow-blue .th { fill: #E6F1FB; }
+    .flow-teal rect { fill: #04342C; stroke: #5DCAA5; }
+    .flow-teal .th { fill: #E1F5EE; }
+    .flow-amber rect { fill: #412402; stroke: #FAC775; }
+    .flow-amber .th { fill: #FAEEDA; }
+    .pass rect { fill: #2C2C2A; stroke: #B4B2A9; }
+    .pass .th { fill: #F1EFE8; } .pass .ts { fill: #B4B2A9; }
+    .arr { stroke: #B4B2A9; }
+    .title-text { fill: #F1EFE8; }
+    .separator { fill: #B4B2A980; }
+  }
+</style>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+
+<text class="title title-text" x="340" y="30" text-anchor="middle">omarchy-exegol-vm — security architecture</text>
+
+<!-- Layer 1: Host LUKS -->
+<g class="layer-host">
+  <rect x="30" y="50" width="620" height="650" rx="20" stroke-width="0.5"/>
+  <text class="th" x="50" y="78">Layer 1 — Host LUKS (Omarchy)</text>
+  <text class="ts" x="50" y="96">SSD LUKS2 Argon2id — pre-existing, untouched</text>
+</g>
+
+<!-- Layer 2: VM -->
+<g class="layer-vm">
+  <rect x="60" y="115" width="560" height="480" rx="16" stroke-width="0.5"/>
+  <text class="th" x="80" y="143">Layer 2 — Ubuntu VM (qemux/qemu container)</text>
+  <text class="ts" x="80" y="161">QCOW2 40G dynamic · SPICE display · cloud-init provisioning</text>
+</g>
+
+<!-- Ephemeral -->
+<g class="ephemeral">
+  <rect x="90" y="178" width="250" height="80" rx="10" stroke-width="0.5"/>
+  <text class="th" x="215" y="206" text-anchor="middle">Ephemeral mode</text>
+  <text class="ts" x="215" y="226" text-anchor="middle">tmpfs /home + /tmp</text>
+  <text class="ts" x="215" y="244" text-anchor="middle">Nothing persists on disk</text>
+</g>
+
+<!-- Docker + Exegol -->
+<g class="docker">
+  <rect x="360" y="178" width="240" height="80" rx="10" stroke-width="0.5"/>
+  <text class="th" x="480" y="206" text-anchor="middle">Docker + Exegol</text>
+  <text class="ts" x="480" y="226" text-anchor="middle">full / light / web / ad</text>
+  <text class="ts" x="480" y="244" text-anchor="middle">Offensive security tools</text>
+</g>
+
+<!-- Layer 3: Workspace -->
+<g class="workspace">
+  <rect x="90" y="280" width="510" height="90" rx="10" stroke-width="0.5"/>
+  <text class="th" x="345" y="310" text-anchor="middle">Layer 3 — workspace.luks (LUKS2 Argon2id)</text>
+  <text class="ts" x="345" y="330" text-anchor="middle">50 Go encrypted · independent passphrase</text>
+  <text class="ts" x="345" y="350" text-anchor="middle">Mount on demand → /workspace · Loot, reports, notes</text>
+</g>
+
+<!-- Separator -->
+<text class="ts separator" x="340" y="404" text-anchor="middle">─── Control flow ───</text>
+
+<!-- Install -->
+<g class="flow-blue"><rect x="90" y="420" width="120" height="44" rx="8" stroke-width="0.5"/>
+<text class="th" x="150" y="446" text-anchor="middle">install</text></g>
+<g class="flow-blue"><rect x="240" y="420" width="120" height="44" rx="8" stroke-width="0.5"/>
+<text class="th" x="300" y="446" text-anchor="middle">wizard (gum)</text></g>
+<g class="flow-blue"><rect x="390" y="420" width="120" height="44" rx="8" stroke-width="0.5"/>
+<text class="th" x="450" y="446" text-anchor="middle">cloud-init</text></g>
+<line x1="210" y1="442" x2="238" y2="442" class="arr" marker-end="url(#arrow)"/>
+<line x1="360" y1="442" x2="388" y2="442" class="arr" marker-end="url(#arrow)"/>
+
+<!-- Launch -->
+<g class="flow-teal"><rect x="90" y="490" width="120" height="44" rx="8" stroke-width="0.5"/>
+<text class="th" x="150" y="516" text-anchor="middle">launch</text></g>
+<g class="flow-teal"><rect x="240" y="490" width="140" height="44" rx="8" stroke-width="0.5"/>
+<text class="th" x="310" y="516" text-anchor="middle">docker compose</text></g>
+<g class="flow-teal"><rect x="410" y="490" width="140" height="44" rx="8" stroke-width="0.5"/>
+<text class="th" x="480" y="516" text-anchor="middle">SPICE viewer</text></g>
+<line x1="210" y1="512" x2="238" y2="512" class="arr" marker-end="url(#arrow)"/>
+<line x1="380" y1="512" x2="408" y2="512" class="arr" marker-end="url(#arrow)"/>
+
+<!-- Workspace -->
+<g class="flow-amber"><rect x="90" y="560" width="165" height="44" rx="8" stroke-width="0.5"/>
+<text class="th" x="172" y="586" text-anchor="middle">workspace mount</text></g>
+<g class="flow-amber"><rect x="285" y="560" width="140" height="44" rx="8" stroke-width="0.5"/>
+<text class="th" x="355" y="586" text-anchor="middle">cryptsetup open</text></g>
+<g class="flow-amber"><rect x="455" y="560" width="130" height="44" rx="8" stroke-width="0.5"/>
+<text class="th" x="520" y="586" text-anchor="middle">/workspace</text></g>
+<line x1="255" y1="582" x2="283" y2="582" class="arr" marker-end="url(#arrow)"/>
+<line x1="425" y1="582" x2="453" y2="582" class="arr" marker-end="url(#arrow)"/>
+
+<!-- Passphrases -->
+<g class="pass">
+  <rect x="90" y="630" width="510" height="55" rx="8" stroke-width="0.5"/>
+  <text class="th" x="105" y="655">Passphrases:</text>
+  <text class="ts" x="210" y="655">① LUKS host (boot)</text>
+  <text class="ts" x="360" y="655">② VM piwi (SPICE)</text>
+  <text class="ts" x="510" y="655">③ workspace (opt.)</text>
+</g>
+</svg>
