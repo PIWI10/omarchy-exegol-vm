@@ -1,0 +1,87 @@
+#cloud-config
+hostname: exegol-vm
+manage_etc_hosts: true
+fqdn: exegol-vm
+
+users:
+  - name: piwi
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    groups: [docker, sudo]
+    lock_passwd: false
+
+chpasswd:
+  expire: false
+  users:
+    - name: piwi
+      password: __VM_PASSWORD__
+      type: text
+
+ssh_pwauth: true
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - docker.io
+  - docker-compose
+  - python3-pip
+  - python3-venv
+  - cryptsetup
+  - curl
+  - git
+  - tmux
+  - qemu-guest-agent
+  - spice-vdagent
+
+runcmd:
+  # Docker
+  - systemctl enable --now docker
+  - usermod -aG docker piwi
+
+  # Exegol wrapper (isolated venv)
+  - python3 -m venv /opt/exegol-venv
+  - /opt/exegol-venv/bin/pip install exegol
+  - ln -sf /opt/exegol-venv/bin/exegol /usr/local/bin/exegol
+
+  # Pull Exegol image (injected by install.sh)
+  - exegol install __EXEGOL_IMAGE__
+
+  # Ephemeral overlay: tmpfs on /home and /tmp
+  - grep -q 'tmpfs /tmp' /etc/fstab || echo 'tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0' >> /etc/fstab
+  - grep -q 'tmpfs /home' /etc/fstab || echo 'tmpfs /home tmpfs defaults,noatime 0 0' >> /etc/fstab
+
+  # Save piwi skeleton for ephemeral /home repopulation
+  - mkdir -p /etc/skel-piwi
+  - cp -a /home/piwi/. /etc/skel-piwi/ 2>/dev/null || true
+
+  # Systemd unit to repopulate /home/piwi on each boot
+  - |
+    cat > /etc/systemd/system/home-piwi-init.service << 'EOF'
+    [Unit]
+    Description=Populate ephemeral /home/piwi from skeleton
+    After=local-fs.target
+    ConditionPathExists=!/home/piwi/.bashrc
+
+    [Service]
+    Type=oneshot
+    ExecStart=/bin/bash -c 'cp -a /etc/skel-piwi/. /home/piwi/ && chown -R piwi:piwi /home/piwi'
+
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+    systemctl daemon-reload
+    systemctl enable home-piwi-init.service
+
+  # Workspace mount point
+  - mkdir -p /workspace
+  - chown piwi:piwi /workspace
+
+  # Security: shred cloud-init user-data after first boot
+  - shred -u /var/lib/cloud/instance/user-data.txt 2>/dev/null || true
+  - shred -u /var/lib/cloud/instance/scripts/runcmd 2>/dev/null || true
+
+  # Signal completion
+  - touch /var/lib/cloud/.exegol-setup-done
+
+final_message: "Exegol VM cloud-init completed after $UPTIME seconds."

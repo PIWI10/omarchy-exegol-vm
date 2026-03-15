@@ -1,0 +1,25 @@
+services:
+  exegol-vm:
+    image: qemux/qemu
+    container_name: omarchy-exegol-vm
+    privileged: true
+    environment:
+      RAM_SIZE: "__RAM__"
+      CPU_CORES: "__CPU__"
+      DISK_SIZE: "40G"
+      BOOT_MODE: "legacy"
+      VGA: "virtio"
+      DISPLAY: "disabled"
+      WEB: "N"
+      ARGUMENTS: "-spice unix=on,addr=/storage/spice.sock,disable-ticketing=on -device qemu-xhci -device usb-tablet -device virtio-serial-pci -chardev spicevmc,id=vdagent,name=vdagent -device virtserialport,chardev=vdagent,name=com.redhat.spice.0 -drive file=/storage/ubuntu.iso,media=cdrom -drive file=/storage/seed.img,media=cdrom,format=raw"
+    devices:
+      - /dev/kvm
+      - /dev/net/tun
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - __HOME__/.exegol:/storage
+      - __HOME__/.exegol/workspace-mount:/shared
+      - __HOME__/.config/exegol/start.sh:/run/start.sh:ro
+    restart: "no"
+    stop_grace_period: 2m
