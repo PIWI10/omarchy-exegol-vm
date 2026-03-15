@@ -2,7 +2,7 @@ pkgbase = omarchy-exegol-vm
 	pkgdesc = Encrypted Exegol offensive-security VM for Omarchy (Ubuntu + Docker + Exegol, triple-layer LUKS)
 	pkgver = 0.1.0
 	pkgrel = 1
-	url = https://github.com/piwi-music/omarchy-exegol-vm
+	url = https://github.com/PIWI10/omarchy-exegol-vm
 	arch = any
 	license = MIT
 	makedepends = git
@@ -15,7 +15,7 @@ pkgbase = omarchy-exegol-vm
 	depends = libnotify
 	depends = sudo
 	depends = virt-viewer
-	source = omarchy-exegol-vm-0.1.0.tar.gz::https://github.com/piwi-music/omarchy-exegol-vm/archive/refs/tags/v0.1.0.tar.gz
+	source = omarchy-exegol-vm-0.1.0.tar.gz::https://github.com/PIWI10/omarchy-exegol-vm/archive/refs/tags/v0.1.0.tar.gz
 	sha256sums = SKIP
 
 pkgname = omarchy-exegol-vm

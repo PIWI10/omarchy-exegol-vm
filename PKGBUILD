@@ -4,7 +4,7 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc='Encrypted Exegol offensive-security VM for Omarchy (Ubuntu + Docker + Exegol, triple-layer LUKS)'
 arch=('any')
-url='https://github.com/piwi-music/omarchy-exegol-vm'
+url='https://github.com/PIWI10/omarchy-exegol-vm'
 license=('MIT')
 depends=(
   'bash'
