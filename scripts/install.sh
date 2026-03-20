@@ -27,12 +27,39 @@ detect_iso() {
   return 1
 }
 
+resolve_latest_server_iso() {
+  # Scrape the Ubuntu 24.04 releases page for the latest server ISO filename
+  local BASE_URL="https://releases.ubuntu.com/24.04"
+  local ISO_NAME
+  ISO_NAME=$(curl -fsSL "$BASE_URL/" \
+    | grep -oP 'ubuntu-24\.04\.\d+-live-server-amd64\.iso' \
+    | sort -V | tail -1)
+
+  if [[ -n "$ISO_NAME" ]]; then
+    echo "$ISO_NAME"
+    return 0
+  fi
+  return 1
+}
+
 download_iso() {
-  local ISO_URL="https://releases.ubuntu.com/24.04/ubuntu-24.04.2-live-server-amd64.iso"
-  local ISO_DEST="$HOME/Downloads/ubuntu-24.04.2-live-server-amd64.iso"
+  local BASE_URL="https://releases.ubuntu.com/24.04"
+  local ISO_NAME
 
   echo "No Ubuntu ISO found locally." >&2
-  echo "Downloading Ubuntu Server 24.04 LTS..." >&2
+  echo "Resolving latest Ubuntu Server 24.04 LTS ISO..." >&2
+
+  if ISO_NAME=$(resolve_latest_server_iso); then
+    echo "Found: $ISO_NAME" >&2
+  else
+    echo "WARNING: Could not resolve latest ISO, trying fallback..." >&2
+    ISO_NAME="ubuntu-24.04.4-live-server-amd64.iso"
+  fi
+
+  local ISO_URL="${BASE_URL}/${ISO_NAME}"
+  local ISO_DEST="$HOME/Downloads/${ISO_NAME}"
+
+  echo "Downloading $ISO_NAME..." >&2
   echo "URL: $ISO_URL" >&2
 
   mkdir -p "$HOME/Downloads"
@@ -41,7 +68,6 @@ download_iso() {
     exit 1
   }
 
-  # Only the path goes to stdout (for capture by caller)
   echo "$ISO_DEST"
 }
 
