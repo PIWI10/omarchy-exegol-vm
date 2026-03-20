@@ -2,14 +2,27 @@
 set -euo pipefail
 
 # install.sh — Interactive wizard for omarchy-exegol-vm first-time setup.
-# Called by: bin/omarchy-exegol-vm install
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EXEGOL_STORAGE="$HOME/.exegol"
 EXEGOL_CONFIG="$HOME/.config/exegol"
+EXEGOL_SHARED="$HOME/Exegol"
 COMPOSE_FILE="$EXEGOL_CONFIG/docker-compose.yml"
 
 # ── ISO detection ─────────────────────────────────────────────────
+
+resolve_latest_server_iso() {
+  local BASE_URL="https://releases.ubuntu.com/24.04"
+  local ISO_NAME
+  ISO_NAME=$(curl -fsSL "$BASE_URL/" \
+    | grep -oP 'ubuntu-24\.04\.\d+-live-server-amd64\.iso' \
+    | sort -V | tail -1)
+  if [[ -n "$ISO_NAME" ]]; then
+    echo "$ISO_NAME"
+    return 0
+  fi
+  return 1
+}
 
 detect_iso() {
   local match
@@ -24,21 +37,6 @@ detect_iso() {
       return 0
     fi
   done
-  return 1
-}
-
-resolve_latest_server_iso() {
-  # Scrape the Ubuntu 24.04 releases page for the latest server ISO filename
-  local BASE_URL="https://releases.ubuntu.com/24.04"
-  local ISO_NAME
-  ISO_NAME=$(curl -fsSL "$BASE_URL/" \
-    | grep -oP 'ubuntu-24\.04\.\d+-live-server-amd64\.iso' \
-    | sort -V | tail -1)
-
-  if [[ -n "$ISO_NAME" ]]; then
-    echo "$ISO_NAME"
-    return 0
-  fi
   return 1
 }
 
@@ -99,22 +97,23 @@ run_wizard() {
   TOTAL_RAM_GB=$(awk 'NR==1 {printf "%d", $2/1024/1024}' /proc/meminfo)
   local TOTAL_CORES
   TOTAL_CORES=$(nproc)
+  local AVAILABLE_SPACE
+  AVAILABLE_SPACE=$(df "$HOME" | awk 'NR==2 {print int($4/1024/1024)}')
 
   echo ""
   echo "System Resources Detected:"
   echo "  Total RAM: ${TOTAL_RAM_GB}G"
   echo "  Total CPU Cores: $TOTAL_CORES"
+  echo "  Available Disk: ${AVAILABLE_SPACE}G"
   echo ""
 
   # RAM
-  local RAM_OPTIONS=""
-  local size
+  local RAM_OPTIONS="" size
   for size in 2 4 8 16 32; do
     if (( size <= TOTAL_RAM_GB )); then
       RAM_OPTIONS="$RAM_OPTIONS ${size}G"
     fi
   done
-
   local SELECTED_RAM
   SELECTED_RAM=$(echo $RAM_OPTIONS | tr ' ' '\n' | gum choose --selected="4G" --header="RAM to allocate to the Exegol VM?")
   [[ -z "$SELECTED_RAM" ]] && { echo "Installation cancelled."; exit 1; }
@@ -128,9 +127,23 @@ run_wizard() {
     SELECTED_CORES=2
   fi
 
+  # Disk size
+  local DISK_OPTIONS="" MAX_DISK_GB=$((AVAILABLE_SPACE - 60))
+  for size in 40 80 128 256; do
+    if (( size <= MAX_DISK_GB )); then
+      DISK_OPTIONS="$DISK_OPTIONS ${size}G"
+    fi
+  done
+  local SELECTED_DISK DEFAULT_DISK="80G"
+  if ! echo "$DISK_OPTIONS" | grep -q "80G"; then
+    DEFAULT_DISK="40G"
+  fi
+  SELECTED_DISK=$(echo $DISK_OPTIONS | tr ' ' '\n' | gum choose --selected="$DEFAULT_DISK" --header="Max disk size for VM? (grows dynamically up to this limit)")
+  [[ -z "$SELECTED_DISK" ]] && { echo "Installation cancelled."; exit 1; }
+
   # Exegol image
   local SELECTED_IMAGE
-  SELECTED_IMAGE=$(printf 'full\nlight\nweb\nad' | gum choose --selected="full" --header="Exegol image to install inside the VM?")
+  SELECTED_IMAGE=$(printf 'full\nlight\nweb\nad\nosint\nnightly' | gum choose --selected="full" --header="Exegol image to install inside the VM?")
   [[ -z "$SELECTED_IMAGE" ]] && { echo "Installation cancelled."; exit 1; }
 
   # Workspace size
@@ -142,10 +155,17 @@ run_wizard() {
     WORKSPACE_SIZE=50
   fi
 
-  # ── VM password ──
+  # ── VM username ──
   echo ""
+  local VM_USERNAME
+  VM_USERNAME=$(gum input --placeholder="Username (default: piwi)" --value="piwi" --header="VM login username:")
+  [[ -z "$VM_USERNAME" ]] && VM_USERNAME="piwi"
+  VM_USERNAME=$(echo "$VM_USERNAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
+  [[ -z "$VM_USERNAME" ]] && VM_USERNAME="piwi"
+
+  # ── VM password ──
   local VM_PASSWORD
-  VM_PASSWORD=$(gum input --placeholder="Password for piwi user inside VM" --password --header="VM user password (piwi):")
+  VM_PASSWORD=$(gum input --placeholder="Password for $VM_USERNAME inside VM" --password --header="VM password for $VM_USERNAME:")
   [[ -z "$VM_PASSWORD" ]] && { echo "Installation cancelled."; exit 1; }
   local VM_PASSWORD_CONFIRM
   VM_PASSWORD_CONFIRM=$(gum input --placeholder="Confirm password" --password --header="Confirm VM password:")
@@ -177,9 +197,12 @@ run_wizard() {
     "ISO:         $(basename "$ISO_PATH")" \
     "RAM:         $SELECTED_RAM" \
     "CPU:         $SELECTED_CORES cores" \
+    "Disk:        $SELECTED_DISK (dynamic)" \
     "Exegol:      $SELECTED_IMAGE" \
     "Workspace:   ${WORKSPACE_SIZE} Go (LUKS2)" \
-    "VM user:     piwi"
+    "Shared:      ~/Exegol ↔ ~/Exegol (in VM)" \
+    "VM user:     $VM_USERNAME" \
+    "SSH:         localhost:2222"
 
   echo ""
   if ! gum confirm "Proceed with this configuration?"; then
@@ -193,7 +216,7 @@ run_wizard() {
   sudo -v || exit 1
 
   # ── Create directories ──
-  mkdir -p "$EXEGOL_STORAGE" "$EXEGOL_CONFIG"
+  mkdir -p "$EXEGOL_STORAGE" "$EXEGOL_CONFIG" "$EXEGOL_SHARED"
   chattr +C "$EXEGOL_STORAGE" 2>/dev/null || true
 
   # ── Copy ISO into storage ──
@@ -201,9 +224,6 @@ run_wizard() {
     echo "Copying ISO to storage..."
     cp "$ISO_PATH" "$EXEGOL_STORAGE/ubuntu.iso"
   fi
-
-  # ── Note: qemux/qemu auto-creates data.qcow2 from DISK_SIZE ──
-  # No manual QCOW2 creation needed.
 
   # ── Create workspace.luks ──
   echo ""
@@ -218,6 +238,7 @@ run_wizard() {
   cp "$SCRIPT_DIR/cloud-init/meta-data" "$CLOUD_INIT_DIR/meta-data"
 
   sed \
+    -e "s|__VM_USERNAME__|${VM_USERNAME}|g" \
     -e "s|__VM_PASSWORD__|${VM_PASSWORD}|g" \
     -e "s|__EXEGOL_IMAGE__|${SELECTED_IMAGE}|g" \
     "$SCRIPT_DIR/cloud-init/user-data.tmpl" > "$CLOUD_INIT_DIR/user-data"
@@ -256,8 +277,17 @@ STARTHOOK
   sed \
     -e "s|__RAM__|${SELECTED_RAM}|g" \
     -e "s|__CPU__|${SELECTED_CORES}|g" \
+    -e "s|__DISK__|${SELECTED_DISK}|g" \
     -e "s|__HOME__|${HOME}|g" \
     "$SCRIPT_DIR/compose.yml.tmpl" > "$COMPOSE_FILE"
+
+  # ── Save config for later use ──
+  cat > "$EXEGOL_CONFIG/.vm-config" << VMCONF
+VM_USERNAME=$VM_USERNAME
+EXEGOL_IMAGE=$SELECTED_IMAGE
+DISK_SIZE=$SELECTED_DISK
+SSH_PORT=2222
+VMCONF
 
   # ── First boot ──
   echo ""
@@ -269,6 +299,9 @@ STARTHOOK
   echo "You can monitor cloud-init progress inside the VM with:"
   echo "  sudo tail -f /var/log/cloud-init-output.log"
   echo ""
+
+  # Ensure workspace-mount dir exists (even if not mounted)
+  mkdir -p "$EXEGOL_STORAGE/workspace-mount"
 
   docker compose -f "$COMPOSE_FILE" up -d 2>&1 || {
     echo "ERROR: Failed to start Exegol VM."
@@ -290,7 +323,27 @@ STARTHOOK
   docker exec omarchy-exegol-vm chmod 666 /storage/spice.sock
 
   echo ""
-  echo "Exegol VM is booting! Launching SPICE viewer..."
+
+  # ── Login recap ──
+  gum style \
+    --border normal \
+    --padding "1 2" \
+    --margin "1" \
+    --align left \
+    --bold \
+    "Exegol VM Ready!" \
+    "" \
+    "Login:       $VM_USERNAME" \
+    "Password:    (the one you just set)" \
+    "SSH:         ssh $VM_USERNAME@localhost -p 2222" \
+    "Shared:      ~/Exegol ↔ ~/Exegol (in VM)" \
+    "Clipboard:   Ctrl+Shift+C / Ctrl+Shift+V" \
+    "" \
+    "After cloud-init finishes, run:" \
+    "  omarchy-exegol-vm finalize"
+
+  echo ""
+  echo "Launching SPICE viewer..."
   echo "Closing the viewer will power down the VM."
 
   setsid bash -c "
@@ -305,16 +358,6 @@ STARTHOOK
     docker compose -f '$COMPOSE_FILE' down 2>/dev/null || true
     rm -f '$SPICE_SOCK'
   " &>/dev/null &
-
-  echo ""
-  echo "Installation complete!"
-  echo ""
-  echo "After cloud-init finishes inside the VM, shut it down and"
-  echo "remove the ISO/seed boot media with:"
-  echo "  omarchy-exegol-vm finalize"
-  echo ""
-  echo "Or simply relaunch later with:"
-  echo "  omarchy-exegol-vm launch"
 }
 
 run_wizard "$@"

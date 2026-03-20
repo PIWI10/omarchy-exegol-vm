@@ -7,6 +7,7 @@ STATE_ROOT="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy-exegol-vm"
 COMPOSE_FILE="$CONFIG_ROOT/exegol/docker-compose.yml"
 EXEGOL_CONFIG_DIR="$CONFIG_ROOT/exegol"
 EXEGOL_STORAGE="$HOME/.exegol"
+EXEGOL_SHARED="$HOME/Exegol"
 CONTAINER_NAME="${OMARCHY_EXEGOL_VM_CONTAINER_NAME:-omarchy-exegol-vm}"
 USER_APPLICATIONS_DIR="$DATA_ROOT/applications"
 RUNTIME_DESKTOP_FILE="$USER_APPLICATIONS_DIR/omarchy-exegol-vm.desktop"
@@ -14,7 +15,6 @@ WORKSPACE_MAPPER_NAME="exegol-workspace"
 WORKSPACE_MOUNT_POINT="$EXEGOL_STORAGE/workspace-mount"
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
-# Resolve scripts dir: pacman install (/usr/share/...) or dev checkout (../scripts/)
 if [[ -d "/usr/share/omarchy-exegol-vm/scripts" ]]; then
   SCRIPTS_DIR="/usr/share/omarchy-exegol-vm/scripts"
 elif [[ -d "$SCRIPT_DIR/../scripts" ]]; then
@@ -24,28 +24,32 @@ else
   exit 1
 fi
 
+# ── Debug system ──────────────────────────────────────────────────
+
 DEBUG_MODE=false
 DEBUG_SUBCOMMAND=""
 DEBUG_REPORT_DIR=""
 DEBUG_STAGE="setup"
 DEBUG_STATUS="pending"
 DEBUG_MESSAGE=""
+DEBUG_IMAGE_ACTION="not-applicable"
 DEBUG_PRESERVED_ARTIFACTS=()
+DEBUG_URLS=()
 
-# ── Debug helpers (same pattern as kali-vm) ───────────────────────
+record_debug_url() {
+  local url="$1"
+  if [[ "$DEBUG_MODE" != true ]] || [[ -z "$url" ]]; then return 0; fi
+  DEBUG_URLS+=("$url")
+}
 
 record_preserved_artifact() {
   local artifact_path="$1"
-  if [[ "$DEBUG_MODE" != true ]] || [[ -z "$artifact_path" ]]; then
-    return 0
-  fi
+  if [[ "$DEBUG_MODE" != true ]] || [[ -z "$artifact_path" ]]; then return 0; fi
   DEBUG_PRESERVED_ARTIFACTS+=("$artifact_path")
 }
 
 ensure_debug_report_dir() {
-  if [[ "$DEBUG_MODE" != true ]] || [[ -n "$DEBUG_REPORT_DIR" ]]; then
-    return 0
-  fi
+  if [[ "$DEBUG_MODE" != true ]] || [[ -n "$DEBUG_REPORT_DIR" ]]; then return 0; fi
   local timestamp
   timestamp=$(date -u +%Y%m%dT%H%M%SZ)
   DEBUG_REPORT_DIR="$STATE_ROOT/${DEBUG_SUBCOMMAND}-${timestamp}"
@@ -53,9 +57,7 @@ ensure_debug_report_dir() {
 }
 
 write_debug_report() {
-  if [[ "$DEBUG_MODE" != true ]]; then
-    return 0
-  fi
+  if [[ "$DEBUG_MODE" != true ]]; then return 0; fi
   ensure_debug_report_dir
   {
     printf 'subcommand: %s\n' "$DEBUG_SUBCOMMAND"
@@ -68,6 +70,15 @@ write_debug_report() {
     printf 'compose_file: %s\n' "$COMPOSE_FILE"
     printf 'config_dir: %s\n' "$EXEGOL_CONFIG_DIR"
     printf 'storage_dir: %s\n' "$EXEGOL_STORAGE"
+    printf 'shared_dir: %s\n' "$EXEGOL_SHARED"
+    printf 'runtime_launcher: %s\n' "$RUNTIME_DESKTOP_FILE"
+    printf 'docker_image_action: %s\n' "$DEBUG_IMAGE_ACTION"
+    printf '\nurls:\n'
+    if (( ${#DEBUG_URLS[@]} == 0 )); then
+      printf '  (none)\n'
+    else
+      printf '  %s\n' "${DEBUG_URLS[@]}"
+    fi
     printf '\npreserved_artifacts:\n'
     if (( ${#DEBUG_PRESERVED_ARTIFACTS[@]} == 0 )); then
       printf '  (none)\n'
@@ -78,9 +89,7 @@ write_debug_report() {
 }
 
 print_debug_summary() {
-  if [[ "$DEBUG_MODE" != true ]]; then
-    return 0
-  fi
+  if [[ "$DEBUG_MODE" != true ]]; then return 0; fi
   echo "Debug report written to: $DEBUG_REPORT_DIR"
   if (( ${#DEBUG_PRESERVED_ARTIFACTS[@]} > 0 )); then
     echo "Preserved artifacts:"
@@ -96,26 +105,24 @@ prepare_debug_run() {
   DEBUG_STAGE="setup"
   DEBUG_STATUS="running"
   DEBUG_MESSAGE=""
+  DEBUG_IMAGE_ACTION="not-applicable"
   DEBUG_PRESERVED_ARTIFACTS=()
+  DEBUG_URLS=()
   ensure_debug_report_dir
   echo "Debug mode enabled."
   echo "Reports will be written under: $DEBUG_REPORT_DIR"
 }
 
 capture_debug_sidecar() {
-  local source_path="$1"
-  local dest_name="$2"
-  if [[ "$DEBUG_MODE" != true ]] || [[ ! -f "$source_path" ]]; then
-    return 0
-  fi
+  local source_path="$1" dest_name="$2"
+  if [[ "$DEBUG_MODE" != true ]] || [[ ! -f "$source_path" ]]; then return 0; fi
   ensure_debug_report_dir
   cp -f "$source_path" "$DEBUG_REPORT_DIR/$dest_name"
   record_preserved_artifact "$DEBUG_REPORT_DIR/$dest_name"
 }
 
-fail_install() {
-  local stage="$1"
-  local message="$2"
+fail_debug() {
+  local stage="$1" message="$2"
   DEBUG_STAGE="$stage"
   DEBUG_STATUS="failed"
   DEBUG_MESSAGE="$message"
@@ -125,36 +132,43 @@ fail_install() {
   exit 1
 }
 
-parse_debug_flag() {
-  local subcommand="$1"
-  shift
-  DEBUG_MODE=false
-  if [[ $# -eq 0 ]]; then
-    return 0
+preserve_install_debug_artifacts() {
+  if [[ "$DEBUG_MODE" != true ]]; then return 0; fi
+  capture_debug_sidecar "$COMPOSE_FILE" "docker-compose.yml"
+  capture_debug_sidecar "$EXEGOL_CONFIG_DIR/.vm-config" "vm-config"
+  if [[ -f "$EXEGOL_STORAGE/ubuntu.iso" ]]; then
+    record_preserved_artifact "$EXEGOL_STORAGE/ubuntu.iso"
   fi
+}
+
+preserve_remove_debug_artifacts() {
+  if [[ "$DEBUG_MODE" != true ]]; then return 0; fi
+  capture_debug_sidecar "$COMPOSE_FILE" "docker-compose.yml"
+  capture_debug_sidecar "$EXEGOL_CONFIG_DIR/.vm-config" "vm-config"
+}
+
+parse_debug_flag() {
+  local subcommand="$1"; shift
+  DEBUG_MODE=false
+  if [[ $# -eq 0 ]]; then return 0; fi
   case "$1" in
     --debug)
       if [[ $# -ne 1 ]]; then
-        echo "Unknown option(s) for $subcommand: ${*:2}" >&2
-        exit 1
+        echo "Unknown option(s) for $subcommand: ${*:2}" >&2; exit 1
       fi
       prepare_debug_run "$subcommand"
       ;;
-    *)
-      echo "Unknown option for $subcommand: $1" >&2
-      exit 1
-      ;;
+    *) echo "Unknown option for $subcommand: $1" >&2; exit 1 ;;
   esac
 }
 
 # ── Dependency checks ─────────────────────────────────────────────
 
 require_command() {
-  local command_name="$1"
-  local package_hint="${2:-$1}"
+  local command_name="$1" package_hint="${2:-$1}"
   if ! command -v "$command_name" >/dev/null 2>&1; then
     echo "Missing required command: $command_name"
-    echo "Install the package that provides it: $package_hint"
+    echo "Install: $package_hint"
     exit 1
   fi
 }
@@ -167,18 +181,11 @@ require_compose() {
   fi
 }
 
-docker_available() {
-  command -v docker >/dev/null 2>&1
-}
-
-docker_compose_available() {
-  docker_available && docker compose version >/dev/null 2>&1
-}
+docker_available() { command -v docker >/dev/null 2>&1; }
+docker_compose_available() { docker_available && docker compose version >/dev/null 2>&1; }
 
 notify_if_available() {
-  if command -v notify-send >/dev/null 2>&1; then
-    notify-send "$@"
-  fi
+  if command -v notify-send >/dev/null 2>&1; then notify-send "$@"; fi
 }
 
 check_common_dependencies() {
@@ -203,13 +210,24 @@ check_remove_dependencies() {
   require_command gum gum
 }
 
-# ── Desktop entry helpers (same pattern as kali-vm) ───────────────
+# ── VM config helpers ─────────────────────────────────────────────
+
+load_vm_config() {
+  local config_file="$EXEGOL_CONFIG_DIR/.vm-config"
+  VM_USERNAME="unknown"
+  SSH_PORT="2222"
+  if [[ -f "$config_file" ]]; then
+    # shellcheck disable=SC1090
+    source "$config_file"
+  fi
+}
+
+# ── Desktop entry helpers ─────────────────────────────────────────
 
 refresh_desktop_database() {
-  if ! command -v update-desktop-database >/dev/null 2>&1; then
-    return 0
+  if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$USER_APPLICATIONS_DIR" >/dev/null 2>&1 || true
   fi
-  update-desktop-database "$USER_APPLICATIONS_DIR" >/dev/null 2>&1 || true
 }
 
 write_runtime_launcher() {
@@ -241,35 +259,27 @@ list_managed_state_paths() {
     "$EXEGOL_CONFIG_DIR" \
     "$COMPOSE_FILE" \
     "$EXEGOL_STORAGE" \
+    "$EXEGOL_SHARED" \
     "$RUNTIME_DESKTOP_FILE"
 }
 
 list_existing_managed_state_paths() {
   local managed_path
   while IFS= read -r managed_path; do
-    if [[ -e "$managed_path" ]]; then
-      printf '%s\n' "$managed_path"
-    fi
+    if [[ -e "$managed_path" ]]; then printf '%s\n' "$managed_path"; fi
   done < <(list_managed_state_paths)
 }
 
 managed_state_exists() {
   local existing_state
   while IFS= read -r existing_state; do
-    if [[ -n "$existing_state" ]]; then
-      return 0
-    fi
+    if [[ -n "$existing_state" ]]; then return 0; fi
   done < <(list_existing_managed_state_paths)
   return 1
 }
 
 path_state_label() {
-  local managed_path="$1"
-  if [[ -e "$managed_path" ]]; then
-    printf 'present'
-  else
-    printf 'not present'
-  fi
+  if [[ -e "$1" ]]; then printf 'present'; else printf 'not present'; fi
 }
 
 print_install_existing_state_error() {
@@ -289,6 +299,7 @@ print_remove_preview() {
   printf '  Config directory:  %s (%s)\n' "$EXEGOL_CONFIG_DIR" "$(path_state_label "$EXEGOL_CONFIG_DIR")"
   printf '  Compose file:      %s (%s)\n' "$COMPOSE_FILE" "$(path_state_label "$COMPOSE_FILE")"
   printf '  Storage directory: %s (%s)\n' "$EXEGOL_STORAGE" "$(path_state_label "$EXEGOL_STORAGE")"
+  printf '  Shared directory:  %s (%s)\n' "$EXEGOL_SHARED" "$(path_state_label "$EXEGOL_SHARED")"
   printf '  Runtime launcher:  %s (%s)\n' "$RUNTIME_DESKTOP_FILE" "$(path_state_label "$RUNTIME_DESKTOP_FILE")"
 }
 
@@ -296,38 +307,42 @@ print_remove_preview() {
 
 best_effort_remove_docker_artifacts() {
   if docker_compose_available; then
-    docker compose -f "$COMPOSE_FILE" down 2>/dev/null || echo "Warning: Docker Compose shutdown failed during removal; continuing."
+    docker compose -f "$COMPOSE_FILE" down 2>/dev/null || echo "Warning: Docker Compose shutdown failed; continuing."
   elif docker_available; then
-    echo "Skipping Docker Compose shutdown: docker compose unavailable."
+    echo "Skipping Docker Compose shutdown: unavailable."
   else
     echo "Skipping Docker cleanup: docker unavailable."
   fi
 
   if [[ "$DEBUG_MODE" = true ]]; then
+    DEBUG_IMAGE_ACTION="preserved"
     return 0
   fi
 
   if docker_available; then
-    docker rmi qemux/qemu 2>/dev/null || true
+    if docker rmi qemux/qemu 2>/dev/null; then
+      DEBUG_IMAGE_ACTION="removed-if-present"
+    else
+      DEBUG_IMAGE_ACTION="remove-attempted"
+    fi
+  else
+    DEBUG_IMAGE_ACTION="skipped-docker-unavailable"
   fi
 }
 
 # ── SPICE & QEMU helpers ─────────────────────────────────────────
 
 exegol_qemu_arguments() {
-  echo "-spice unix=on,addr=/storage/spice.sock,disable-ticketing=on -device qemu-xhci -device usb-tablet -device virtio-serial-pci -chardev spicevmc,id=vdagent,name=vdagent -device virtserialport,chardev=vdagent,name=com.redhat.spice.0"
+  echo "-spice unix=on,addr=/storage/spice.sock,disable-ticketing=on -device qemu-xhci -device usb-tablet -device virtio-serial-pci -chardev spicevmc,id=vdagent,name=vdagent -device virtserialport,chardev=vdagent,name=com.redhat.spice.0 -nic user,hostfwd=tcp:127.0.0.1:2222-:22 -fsdev local,id=shared_fs,path=/shared,security_model=mapped-xattr -device virtio-9p-pci,fsdev=shared_fs,mount_tag=shared"
 }
 
 ensure_exegol_runtime_config() {
-  # Write start.sh hook if missing
   if [[ ! -f "$EXEGOL_CONFIG_DIR/start.sh" ]]; then
     mkdir -p "$EXEGOL_CONFIG_DIR"
     cat << 'EOF' | tee "$EXEGOL_CONFIG_DIR/start.sh" > /dev/null
 #!/bin/bash
 set -e
-if qemu-system-x86_64 -spice help >/dev/null 2>&1; then
-  exit 0
-fi
+if qemu-system-x86_64 -spice help >/dev/null 2>&1; then exit 0; fi
 echo "Installing QEMU SPICE module..."
 DEBIAN_FRONTEND=noninteractive apt-get -qq update
 DEBIAN_FRONTEND=noninteractive apt-get -qq --no-install-recommends -y install qemu-system-modules-spice > /dev/null
@@ -335,11 +350,9 @@ EOF
     chmod +x "$EXEGOL_CONFIG_DIR/start.sh"
   fi
 
-  # Ensure ARGUMENTS is up-to-date in compose
   if [[ -f "$COMPOSE_FILE" ]]; then
     local QEMU_ARGUMENTS
     QEMU_ARGUMENTS=$(exegol_qemu_arguments)
-    # Only update if the compose no longer has boot media lines (post-finalize)
     if ! grep -q 'seed.img' "$COMPOSE_FILE"; then
       sed -i "s|^\([[:space:]]*ARGUMENTS:\).*|\1 \"$QEMU_ARGUMENTS\"|" "$COMPOSE_FILE"
     fi
@@ -347,7 +360,6 @@ EOF
 }
 
 graceful_shutdown() {
-  # Send ACPI shutdown via QEMU monitor
   if docker inspect --format='{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null | grep -q running; then
     echo "Sending ACPI shutdown to guest..."
     docker exec "$CONTAINER_NAME" bash -c 'echo "system_powerdown" | nc -q1 localhost 7100' 2>/dev/null || true
@@ -390,7 +402,6 @@ install_exegol() {
 
   check_install_dependencies
 
-  # Check KVM
   if [[ ! -e /dev/kvm ]]; then
     gum style \
       --border normal \
@@ -398,9 +409,9 @@ install_exegol() {
       --margin "1" \
       "KVM virtualization not available!" \
       "" \
-      "Please enable virtualization in BIOS or run:" \
-      "  sudo modprobe kvm-intel  # for Intel CPUs" \
-      "  sudo modprobe kvm-amd    # for AMD CPUs"
+      "Enable virtualization in BIOS or run:" \
+      "  sudo modprobe kvm-intel  # Intel" \
+      "  sudo modprobe kvm-amd    # AMD"
     exit 1
   fi
 
@@ -410,6 +421,7 @@ install_exegol() {
   write_runtime_launcher
 
   if [[ "$DEBUG_MODE" = true ]]; then
+    preserve_install_debug_artifacts
     DEBUG_STATUS="succeeded"
     DEBUG_MESSAGE="Install completed successfully."
     write_debug_report
@@ -419,7 +431,7 @@ install_exegol() {
 
 launch_exegol() {
   check_launch_dependencies
-  KEEP_ALIVE=false
+  local KEEP_ALIVE=false
   if [[ "${1:-}" = "--keep-alive" ]] || [[ "${1:-}" = "-k" ]]; then
     KEEP_ALIVE=true
   fi
@@ -430,7 +442,9 @@ launch_exegol() {
   fi
 
   ensure_exegol_runtime_config
+  load_vm_config
 
+  local CONTAINER_STATUS
   CONTAINER_STATUS=$(docker inspect --format='{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || true)
 
   local SPICE_SOCK="$EXEGOL_STORAGE/spice.sock"
@@ -440,6 +454,7 @@ launch_exegol() {
     notify_if_available "Starting Exegol VM" "This can take 15-30 seconds" -t 15000
 
     rm -f "$SPICE_SOCK"
+    mkdir -p "$EXEGOL_SHARED" "$WORKSPACE_MOUNT_POINT"
 
     if ! docker compose -f "$COMPOSE_FILE" up -d 2>&1; then
       echo "Failed to start Exegol VM!"
@@ -454,7 +469,7 @@ launch_exegol() {
     sleep 2
     WAIT_COUNT=$((WAIT_COUNT + 1))
     if (( WAIT_COUNT > 60 )); then
-      echo "Timeout: Exegol VM SPICE not ready within 2 minutes"
+      echo "Timeout: SPICE not ready within 2 minutes"
       notify_if_available -u critical "Exegol VM" "SPICE not ready"
       exit 1
     fi
@@ -462,6 +477,7 @@ launch_exegol() {
   docker exec "$CONTAINER_NAME" chmod 666 /storage/spice.sock
 
   if [[ -t 1 ]]; then
+    local LIFECYCLE
     if [[ $KEEP_ALIVE = "true" ]]; then
       LIFECYCLE="VM will keep running after viewer closes
 To stop: omarchy-exegol-vm stop"
@@ -474,6 +490,11 @@ To stop: omarchy-exegol-vm stop"
       --margin "1" \
       --align center \
       "Connecting to Exegol VM" \
+      "" \
+      "Login: $VM_USERNAME" \
+      "SSH:   ssh $VM_USERNAME@localhost -p $SSH_PORT" \
+      "Clipboard: Ctrl+Shift+C / Ctrl+Shift+V" \
+      "Shared: ~/Exegol ↔ ~/Exegol (in VM)" \
       "" \
       "$LIFECYCLE" \
       "" \
@@ -501,7 +522,6 @@ stop_exegol() {
     echo "Exegol VM not configured."
     exit 1
   fi
-
   echo "Stopping Exegol VM..."
   umount_workspace_if_mounted
   graceful_shutdown
@@ -516,8 +536,10 @@ status_exegol() {
     exit 1
   fi
 
-  CONTAINER_STATUS=$(docker inspect --format='{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || true)
+  load_vm_config
 
+  local CONTAINER_STATUS
+  CONTAINER_STATUS=$(docker inspect --format='{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || true)
   local ws_status
   ws_status=$(bash "$SCRIPTS_DIR/workspace-mount.sh" status 2>/dev/null || echo "unknown")
 
@@ -532,9 +554,13 @@ status_exegol() {
       --align left \
       "Exegol VM Status: RUNNING" \
       "" \
+      "User:      $VM_USERNAME" \
+      "SSH:       ssh $VM_USERNAME@localhost -p $SSH_PORT" \
+      "Shared:    ~/Exegol" \
       "$ws_status" \
       "" \
       "To connect: omarchy-exegol-vm launch" \
+      "To SSH:     omarchy-exegol-vm ssh" \
       "To stop:    omarchy-exegol-vm stop"
   else
     echo "Exegol VM is stopped (status: $CONTAINER_STATUS)"
@@ -543,32 +569,63 @@ status_exegol() {
   fi
 }
 
+ssh_exegol() {
+  load_vm_config
+
+  local CONTAINER_STATUS
+  CONTAINER_STATUS=$(docker inspect --format='{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || true)
+
+  if [[ "$CONTAINER_STATUS" != "running" ]]; then
+    echo "Exegol VM is not running."
+    echo "Start it first: omarchy-exegol-vm launch --keep-alive"
+    exit 1
+  fi
+
+  echo "Connecting via SSH to $VM_USERNAME@localhost:$SSH_PORT..."
+  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    -p "$SSH_PORT" "$VM_USERNAME@localhost"
+}
+
+update_exegol() {
+  load_vm_config
+
+  local CONTAINER_STATUS
+  CONTAINER_STATUS=$(docker inspect --format='{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || true)
+
+  if [[ "$CONTAINER_STATUS" != "running" ]]; then
+    echo "Exegol VM must be running to update."
+    echo "Start it first: omarchy-exegol-vm launch --keep-alive"
+    exit 1
+  fi
+
+  echo "Updating Exegol inside the VM..."
+  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    -p "$SSH_PORT" "$VM_USERNAME@localhost" \
+    "sudo /opt/exegol-venv/bin/pip install --upgrade exegol && exegol update"
+}
+
 workspace_cmd() {
-  local action="${1:-status}"
-  bash "$SCRIPTS_DIR/workspace-mount.sh" "$action"
+  bash "$SCRIPTS_DIR/workspace-mount.sh" "${1:-status}"
 }
 
 finalize_exegol() {
-  # Remove ISO and seed boot media from compose after initial cloud-init setup
   if [[ ! -f "$COMPOSE_FILE" ]]; then
     echo "Exegol VM not configured."
     exit 1
   fi
 
   echo "Finalizing Exegol VM setup..."
-  echo "Removing boot media (ISO + cloud-init seed) from compose configuration."
+  echo "Removing boot media (ISO + cloud-init seed) from compose."
 
-  # Rewrite ARGUMENTS without the -drive lines for ISO and seed
   local QEMU_ARGUMENTS
   QEMU_ARGUMENTS=$(exegol_qemu_arguments)
   sed -i "s|^\([[:space:]]*ARGUMENTS:\).*|\1 \"$QEMU_ARGUMENTS\"|" "$COMPOSE_FILE"
 
-  # Remove the ISO and seed files
   rm -f "$EXEGOL_STORAGE/ubuntu.iso"
   rm -f "$EXEGOL_STORAGE/seed.img"
 
   echo "Finalization complete."
-  echo "The VM will now boot directly from the installed QCOW2."
+  echo "The VM will now boot directly from the installed disk."
   echo "Launch with: omarchy-exegol-vm launch"
 }
 
@@ -586,18 +643,22 @@ remove_exegol() {
   echo "Removing Exegol VM..."
   DEBUG_STAGE="remove"
 
-  # Unmount workspace if active
   umount_workspace_if_mounted
+
+  if [[ "$DEBUG_MODE" = true ]]; then
+    preserve_remove_debug_artifacts
+  fi
 
   best_effort_remove_docker_artifacts
 
   rm -rf "$EXEGOL_CONFIG_DIR"
   rm -rf "$EXEGOL_STORAGE"
+  rm -rf "$EXEGOL_SHARED"
   remove_runtime_launcher
 
   if [[ "$DEBUG_MODE" = true ]]; then
     DEBUG_STATUS="succeeded"
-    DEBUG_MESSAGE="Remove completed with debug retention enabled."
+    DEBUG_MESSAGE="Remove completed with debug retention."
     write_debug_report
     print_debug_summary
   fi
@@ -610,72 +671,50 @@ show_usage() {
   echo "Usage: omarchy-exegol-vm [command] [options]"
   echo ""
   echo "Commands:"
-  echo "  install [--debug]    Install and configure Exegol VM (first-time setup only)"
+  echo "  install [--debug]    Install and configure Exegol VM (first-time setup)"
   echo "  remove [--debug]     Remove Exegol VM and all its data"
-  echo "  launch [options]     Start Exegol VM (if needed) and connect via SPICE"
-  echo "                       Options:"
+  echo "  launch [options]     Start VM and connect via SPICE"
   echo "                         --keep-alive, -k   Keep VM running after viewer closes"
   echo "  stop                 Stop the running Exegol VM"
   echo "  status               Show current VM status"
+  echo "  ssh                  Connect to VM via SSH"
+  echo "  update               Update Exegol wrapper and images inside VM"
   echo "  workspace [action]   Manage encrypted workspace (mount|umount|status)"
-  echo "  finalize             Remove boot media after initial cloud-init setup"
+  echo "  finalize             Remove boot media after initial setup"
   echo "  help                 Show this help message"
   echo ""
   echo "Examples:"
-  echo "  omarchy-exegol-vm install           # Set up Exegol VM for first time"
-  echo "  omarchy-exegol-vm install --debug   # Keep debug evidence"
-  echo "  omarchy-exegol-vm launch            # Connect to VM (auto-stop on exit)"
-  echo "  omarchy-exegol-vm launch -k         # Connect to VM (keep running)"
-  echo "  omarchy-exegol-vm workspace mount   # Mount encrypted workspace"
-  echo "  omarchy-exegol-vm workspace umount  # Lock workspace"
-  echo "  omarchy-exegol-vm finalize          # Remove ISO after first setup"
-  echo "  omarchy-exegol-vm stop              # Shut down the VM"
-  echo "  omarchy-exegol-vm remove --debug    # Remove with debug retention"
+  echo "  omarchy-exegol-vm install             # First-time setup"
+  echo "  omarchy-exegol-vm launch              # Connect (auto-stop on exit)"
+  echo "  omarchy-exegol-vm launch -k           # Connect (keep running)"
+  echo "  omarchy-exegol-vm ssh                 # SSH into running VM"
+  echo "  omarchy-exegol-vm workspace mount     # Mount encrypted workspace"
+  echo "  omarchy-exegol-vm update              # Update Exegol in VM"
+  echo "  omarchy-exegol-vm finalize            # Remove ISO after setup"
+  echo "  omarchy-exegol-vm stop                # Shut down VM"
   echo ""
-  echo "Security:"
-  echo "  The VM uses 3 layers of encryption:"
-  echo "    1. LUKS host (Omarchy, already active)"
-  echo "    2. Ephemeral mode (tmpfs overlay on /home inside VM)"
-  echo "    3. workspace.luks (separate encrypted container for persistent data)"
+  echo "Security layers:"
+  echo "  1. Host LUKS (Omarchy, already active)"
+  echo "  2. Ephemeral mode (tmpfs /home + /tmp inside VM)"
+  echo "  3. workspace.luks (LUKS2 Argon2id, on-demand mount)"
   echo ""
-  echo "Optional Omarchy integration:"
+  echo "Omarchy integration:"
   echo "  omarchy-exegol-vm-integrate-os"
   echo "  omarchy-exegol-vm-unintegrate-os"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   case "${1:-}" in
-    install)
-      shift
-      install_exegol "$@"
-      ;;
-    remove)
-      shift
-      remove_exegol "$@"
-      ;;
-    launch|start)
-      launch_exegol "${2:-}"
-      ;;
-    stop|down)
-      stop_exegol
-      ;;
-    status)
-      status_exegol
-      ;;
-    workspace)
-      workspace_cmd "${2:-status}"
-      ;;
-    finalize)
-      finalize_exegol
-      ;;
-    help|--help|-h|"")
-      show_usage
-      ;;
-    *)
-      echo "Unknown command: $1" >&2
-      echo "" >&2
-      show_usage >&2
-      exit 1
-      ;;
+    install)     shift; install_exegol "$@" ;;
+    remove)      shift; remove_exegol "$@" ;;
+    launch|start) launch_exegol "${2:-}" ;;
+    stop|down)   stop_exegol ;;
+    status)      status_exegol ;;
+    ssh)         ssh_exegol ;;
+    update)      update_exegol ;;
+    workspace)   workspace_cmd "${2:-status}" ;;
+    finalize)    finalize_exegol ;;
+    help|--help|-h|"") show_usage ;;
+    *) echo "Unknown command: $1" >&2; echo "" >&2; show_usage >&2; exit 1 ;;
   esac
 fi

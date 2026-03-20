@@ -6,12 +6,12 @@ services:
     environment:
       RAM_SIZE: "__RAM__"
       CPU_CORES: "__CPU__"
-      DISK_SIZE: "40G"
+      DISK_SIZE: "__DISK__"
       BOOT_MODE: "legacy"
       VGA: "virtio"
       DISPLAY: "disabled"
       WEB: "N"
-      ARGUMENTS: "-spice unix=on,addr=/storage/spice.sock,disable-ticketing=on -device qemu-xhci -device usb-tablet -device virtio-serial-pci -chardev spicevmc,id=vdagent,name=vdagent -device virtserialport,chardev=vdagent,name=com.redhat.spice.0 -drive file=/storage/ubuntu.iso,media=cdrom -drive file=/storage/seed.img,media=cdrom,format=raw"
+      ARGUMENTS: "-spice unix=on,addr=/storage/spice.sock,disable-ticketing=on -device qemu-xhci -device usb-tablet -device virtio-serial-pci -chardev spicevmc,id=vdagent,name=vdagent -device virtserialport,chardev=vdagent,name=com.redhat.spice.0 -drive file=/storage/ubuntu.iso,media=cdrom -drive file=/storage/seed.img,media=cdrom,format=raw -nic user,hostfwd=tcp:127.0.0.1:2222-:22 -fsdev local,id=shared_fs,path=/shared,security_model=mapped-xattr -device virtio-9p-pci,fsdev=shared_fs,mount_tag=shared"
     devices:
       - /dev/kvm
       - /dev/net/tun
@@ -19,7 +19,10 @@ services:
       - NET_ADMIN
     volumes:
       - __HOME__/.exegol:/storage
-      - __HOME__/.exegol/workspace-mount:/shared
+      - __HOME__/.exegol/workspace-mount:/workspace
+      - __HOME__/Exegol:/shared
       - __HOME__/.config/exegol/start.sh:/run/start.sh:ro
+    ports:
+      - "127.0.0.1:2222:2222"
     restart: "no"
     stop_grace_period: 2m

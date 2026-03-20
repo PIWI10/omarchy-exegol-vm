@@ -4,7 +4,7 @@ manage_etc_hosts: true
 fqdn: exegol-vm
 
 users:
-  - name: piwi
+  - name: __VM_USERNAME__
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
     groups: [docker, sudo]
@@ -13,7 +13,7 @@ users:
 chpasswd:
   expire: false
   users:
-    - name: piwi
+    - name: __VM_USERNAME__
       password: __VM_PASSWORD__
       type: text
 
@@ -33,11 +33,54 @@ packages:
   - tmux
   - qemu-guest-agent
   - spice-vdagent
+  - openssh-server
+  - xdg-utils
 
 runcmd:
   # Docker
   - systemctl enable --now docker
-  - usermod -aG docker piwi
+  - usermod -aG docker __VM_USERNAME__
+
+  # SSH server
+  - systemctl enable --now ssh
+
+  # SPICE clipboard + resize agent
+  - systemctl enable --now spice-vdagentd
+
+  # SPICE auto-resize workaround (same fix as kali-vm for Hyprland)
+  - |
+    cat > /usr/local/bin/spice-autoresize << 'RESIZESH'
+    #!/bin/bash
+    restart_spice_vdagent() {
+      command -v spice-vdagent >/dev/null 2>&1 || return
+      pkill -x spice-vdagent 2>/dev/null || true
+      spice-vdagent >/dev/null 2>&1 &
+    }
+    while true; do
+      OUTPUT=$(xrandr 2>/dev/null | awk '/ connected/ {print $1; exit}')
+      PREFERRED=$(xrandr 2>/dev/null | awk '/connected/ {found=1; next} found && /+/ {print $1; exit}')
+      CURRENT=$(xrandr 2>/dev/null | awk '/connected/ {found=1; next} found && /\*/ {print $1; exit}')
+      if [[ -n "$PREFERRED" && "$PREFERRED" != "$CURRENT" && -n "$OUTPUT" ]]; then
+        xrandr --output "$OUTPUT" --auto 2>/dev/null
+        restart_spice_vdagent
+      fi
+      sleep 1
+    done
+    RESIZESH
+    chmod +x /usr/local/bin/spice-autoresize
+
+  # Autostart for resize script (if desktop session exists)
+  - |
+    mkdir -p /etc/xdg/autostart
+    cat > /etc/xdg/autostart/spice-autoresize.desktop << 'DESKTOP'
+    [Desktop Entry]
+    Type=Application
+    Name=SPICE Auto Resize
+    Exec=/usr/local/bin/spice-autoresize
+    Hidden=false
+    NoDisplay=true
+    X-GNOME-Autostart-enabled=true
+    DESKTOP
 
   # Exegol wrapper (isolated venv)
   - python3 -m venv /opt/exegol-venv
@@ -47,35 +90,41 @@ runcmd:
   # Pull Exegol image (injected by install.sh)
   - exegol install __EXEGOL_IMAGE__
 
+  # Host shared folder mount (9p virtio)
+  - mkdir -p /home/__VM_USERNAME__/Exegol
+  - |
+    grep -q '9p.*shared' /etc/fstab || \
+      echo 'shared /home/__VM_USERNAME__/Exegol 9p trans=virtio,version=9p2000.L,rw,nofail,x-systemd.automount,_netdev 0 0' >> /etc/fstab
+
+  # Workspace mount point
+  - mkdir -p /workspace
+  - chown __VM_USERNAME__:__VM_USERNAME__ /workspace
+
   # Ephemeral overlay: tmpfs on /home and /tmp
   - grep -q 'tmpfs /tmp' /etc/fstab || echo 'tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0' >> /etc/fstab
   - grep -q 'tmpfs /home' /etc/fstab || echo 'tmpfs /home tmpfs defaults,noatime 0 0' >> /etc/fstab
 
-  # Save piwi skeleton for ephemeral /home repopulation
-  - mkdir -p /etc/skel-piwi
-  - cp -a /home/piwi/. /etc/skel-piwi/ 2>/dev/null || true
+  # Save user skeleton for ephemeral /home repopulation
+  - mkdir -p /etc/skel-vmuser
+  - cp -a /home/__VM_USERNAME__/. /etc/skel-vmuser/ 2>/dev/null || true
 
-  # Systemd unit to repopulate /home/piwi on each boot
+  # Systemd unit to repopulate /home on each boot
   - |
-    cat > /etc/systemd/system/home-piwi-init.service << 'EOF'
+    cat > /etc/systemd/system/home-vmuser-init.service << 'EOF'
     [Unit]
-    Description=Populate ephemeral /home/piwi from skeleton
+    Description=Populate ephemeral home from skeleton
     After=local-fs.target
-    ConditionPathExists=!/home/piwi/.bashrc
+    ConditionPathExists=!/home/__VM_USERNAME__/.bashrc
 
     [Service]
     Type=oneshot
-    ExecStart=/bin/bash -c 'cp -a /etc/skel-piwi/. /home/piwi/ && chown -R piwi:piwi /home/piwi'
+    ExecStart=/bin/bash -c 'cp -a /etc/skel-vmuser/. /home/__VM_USERNAME__/ && chown -R __VM_USERNAME__:__VM_USERNAME__ /home/__VM_USERNAME__'
 
     [Install]
     WantedBy=multi-user.target
     EOF
     systemctl daemon-reload
-    systemctl enable home-piwi-init.service
-
-  # Workspace mount point
-  - mkdir -p /workspace
-  - chown piwi:piwi /workspace
+    systemctl enable home-vmuser-init.service
 
   # Security: shred cloud-init user-data after first boot
   - shred -u /var/lib/cloud/instance/user-data.txt 2>/dev/null || true
